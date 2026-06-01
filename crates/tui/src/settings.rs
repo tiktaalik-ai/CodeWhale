@@ -230,6 +230,9 @@ pub struct Settings {
     /// Maximum workspace depth for `@`-mention completion walks. `0` means
     /// unlimited depth; use with care in very large repositories.
     pub mention_walk_depth: usize,
+    /// `@`-mention completion behavior: fuzzy workspace search or deterministic
+    /// directory browser.
+    pub mention_menu_behavior: String,
     /// Show thinking blocks from the model
     pub show_thinking: bool,
     /// Show detailed tool output
@@ -337,6 +340,7 @@ impl Default for Settings {
             paste_burst_detection: true,
             mention_menu_limit: 128,
             mention_walk_depth: 6,
+            mention_menu_behavior: "fuzzy".to_string(),
             show_thinking: true,
             show_tool_details: true,
             locale: "auto".to_string(),
@@ -559,6 +563,9 @@ impl Settings {
             "mention_walk_depth" | "mention_depth" | "completions_walk_depth" => {
                 self.mention_walk_depth = parse_usize_setting("mention_walk_depth", value)?;
             }
+            "mention_menu_behavior" | "mention_behavior" | "mention_menu" => {
+                self.mention_menu_behavior = normalize_mention_menu_behavior(value)?;
+            }
             "show_thinking" | "thinking" => {
                 self.show_thinking = parse_bool(value)?;
             }
@@ -756,6 +763,10 @@ impl Settings {
         ));
         lines.push(format!("  mention_menu_limit: {}", self.mention_menu_limit));
         lines.push(format!("  mention_walk_depth: {}", self.mention_walk_depth));
+        lines.push(format!(
+            "  mention_behavior:   {}",
+            self.mention_menu_behavior
+        ));
         lines.push(format!("  show_thinking:      {}", self.show_thinking));
         lines.push(format!("  show_tool_details:  {}", self.show_tool_details));
         lines.push(format!("  locale:            {}", self.locale));
@@ -841,6 +852,10 @@ impl Settings {
             (
                 "mention_walk_depth",
                 "Maximum @-mention workspace walk depth; 0 means unlimited (default 6)",
+            ),
+            (
+                "mention_menu_behavior",
+                "@-mention completion behavior: fuzzy/browser (default fuzzy)",
             ),
             ("show_thinking", "Show model thinking: on/off"),
             ("show_tool_details", "Show detailed tool output: on/off"),
@@ -1022,6 +1037,18 @@ fn parse_percent_setting(key: &str, value: &str) -> Result<f64> {
         );
     }
     Ok(percent)
+}
+
+fn normalize_mention_menu_behavior(value: &str) -> Result<String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "fuzzy" | "default" => Ok("fuzzy".to_string()),
+        "browser" | "browse" | "file-browser" | "file_browser" => Ok("browser".to_string()),
+        _ => {
+            anyhow::bail!(
+                "Failed to update setting: invalid mention_menu_behavior '{value}'. Expected: fuzzy, browser."
+            )
+        }
+    }
 }
 
 fn normalize_mode(value: &str) -> &str {
@@ -1261,6 +1288,7 @@ mod tests {
         let mut settings = Settings::default();
         assert_eq!(settings.mention_menu_limit, 128);
         assert_eq!(settings.mention_walk_depth, 6);
+        assert_eq!(settings.mention_menu_behavior, "fuzzy");
 
         settings
             .set("mention_menu_limit", "256")
@@ -1268,14 +1296,23 @@ mod tests {
         settings
             .set("mention_walk_depth", "0")
             .expect("allow unlimited walk depth");
+        settings
+            .set("mention_menu_behavior", "browser")
+            .expect("set mention menu behavior");
 
         assert_eq!(settings.mention_menu_limit, 256);
         assert_eq!(settings.mention_walk_depth, 0);
+        assert_eq!(settings.mention_menu_behavior, "browser");
 
         let err = settings
             .set("mention_walk_depth", "deep")
             .expect_err("non-numeric depth should fail");
         assert!(err.to_string().contains("invalid mention_walk_depth"));
+
+        let err = settings
+            .set("mention_menu_behavior", "random")
+            .expect_err("unknown mention behavior should fail");
+        assert!(err.to_string().contains("invalid mention_menu_behavior"));
     }
 
     #[test]

@@ -1918,7 +1918,8 @@ fn active_tool_status_label_counts_foreground_rlm_work() {
 
     let label = active_tool_status_label(&app).expect("status label");
 
-    assert!(label.contains("tool rlm"), "label: {label}");
+    assert!(label.contains("rlm"), "label: {label}");
+    assert!(!label.contains("tool rlm"), "label: {label}");
     assert!(label.contains("1 active"), "label: {label}");
 }
 

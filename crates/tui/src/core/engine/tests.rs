@@ -1525,6 +1525,143 @@ fn subagent_results_are_summarized_before_parent_context_insertion() {
 }
 
 #[test]
+fn run_verifiers_results_are_structured_before_context_insertion() {
+    let noisy_failure = "node lint failure detail\n".repeat(300);
+    let noisy_success = "successful check output\n".repeat(300);
+    let output = ToolResult::success(
+        json!({
+            "success": false,
+            "profile": "auto",
+            "level": "quick",
+            "workspace": "/repo",
+            "gate_count": 3,
+            "passed": 1,
+            "failed": 1,
+            "skipped": 1,
+            "summary": "1 passed, 1 failed, 1 skipped",
+            "gates": [
+                {
+                    "name": "rust-check",
+                    "ecosystem": "rust",
+                    "status": "passed",
+                    "command": "cargo check --workspace --locked",
+                    "cwd": "/repo",
+                    "exit_code": 0,
+                    "duration_ms": 110,
+                    "stdout": noisy_success.clone(),
+                    "stderr": "",
+                    "stdout_truncated": false,
+                    "stderr_truncated": false,
+                    "skipped_reason": null
+                },
+                {
+                    "name": "node-lint",
+                    "ecosystem": "node",
+                    "status": "failed",
+                    "command": "npm run lint",
+                    "cwd": "/repo",
+                    "exit_code": 1,
+                    "duration_ms": 220,
+                    "stdout": "",
+                    "stderr": noisy_failure,
+                    "stdout_truncated": false,
+                    "stderr_truncated": false,
+                    "skipped_reason": null
+                },
+                {
+                    "name": "python-pytest",
+                    "ecosystem": "python",
+                    "status": "skipped",
+                    "command": "",
+                    "cwd": "/repo",
+                    "exit_code": null,
+                    "duration_ms": 0,
+                    "stdout": "",
+                    "stderr": "",
+                    "stdout_truncated": false,
+                    "stderr_truncated": false,
+                    "skipped_reason": "pytest is not installed"
+                }
+            ]
+        })
+        .to_string(),
+    );
+
+    let context = compact_tool_result_for_context("deepseek-v4-pro", "run_verifiers", &output);
+
+    assert!(context.contains("[run_verifiers result summarized for context]"));
+    assert!(context.contains("summary: 1 passed, 1 failed, 1 skipped"));
+    assert!(context.contains("selection: profile=auto, level=quick"));
+    assert!(context.contains("- node-lint (node): failed exit=1"));
+    assert!(context.contains("command: npm run lint"));
+    assert!(context.contains("- python-pytest (python): skipped"));
+    assert!(context.contains("pytest is not installed"));
+    assert!(context.contains("- rust-check (rust): passed exit=0"));
+    assert!(context.len() < output.content.len());
+    assert!(
+        !context.contains(&noisy_success),
+        "successful gate stdout should not be copied into parent context"
+    );
+}
+
+#[test]
+fn run_tests_results_are_structured_before_context_insertion() {
+    let stdout = "running test suite\n".repeat(500);
+    let stderr = "error[E0425]: cannot find value `missing`\n".repeat(500);
+    let output = ToolResult::success(
+        json!({
+            "success": false,
+            "exit_code": 101,
+            "stdout": stdout,
+            "stderr": stderr,
+            "command": "(cd /repo && cargo test --workspace --all-features)"
+        })
+        .to_string(),
+    );
+
+    let context = compact_tool_result_for_context("deepseek-v4-pro", "run_tests", &output);
+
+    assert!(context.contains("[run_tests result summarized for context]"));
+    assert!(context.contains("status: failed, exit_code: 101"));
+    assert!(context.contains("cargo test --workspace --all-features"));
+    assert!(context.contains("error[E0425]"));
+    assert!(context.contains("running test suite"));
+    assert!(context.len() < output.content.len());
+}
+
+#[test]
+fn task_gate_run_results_are_structured_before_context_insertion() {
+    let output = ToolResult::success(
+        json!({
+            "gate": {
+                "id": "gate_abcd1234",
+                "gate": "clippy",
+                "command": "cargo clippy -p codewhale-tui --all-targets --all-features --locked -- -D warnings",
+                "cwd": "/repo",
+                "exit_code": 1,
+                "status": "failed",
+                "classification": "compile_failure",
+                "duration_ms": 5000,
+                "summary": "warning promoted to error in verifier.rs",
+                "log_path": "/repo/.codewhale/runtime/gate.log",
+                "recorded_at": "2026-06-01T12:00:00Z"
+            },
+            "stdout_summary": "",
+            "stderr_summary": "warning promoted to error"
+        })
+        .to_string(),
+    );
+
+    let context = compact_tool_result_for_context("deepseek-v4-pro", "task_gate_run", &output);
+
+    assert!(context.contains("[task_gate_run result summarized for context]"));
+    assert!(context.contains("gate: clippy, status: failed, exit_code: 1"));
+    assert!(context.contains("cargo clippy -p codewhale-tui"));
+    assert!(context.contains("summary: warning promoted to error"));
+    assert!(context.contains("log_path: /repo/.codewhale/runtime/gate.log"));
+}
+
+#[test]
 fn refresh_system_prompt_leaves_working_set_out_of_system_prompt() {
     let tmp = tempdir().expect("tempdir");
     fs::create_dir_all(tmp.path().join("src")).expect("mkdir");
